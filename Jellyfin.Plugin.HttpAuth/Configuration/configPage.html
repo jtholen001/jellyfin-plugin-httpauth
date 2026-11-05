@@ -13,7 +13,7 @@
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label" style="height:auto">
                                 <input id="chkEnablePlugin" name="chkEnablePlugin" type="checkbox" is="emby-checkbox" />
-                                <span>Enable this plugin. <b>Please confirm that you know what you're doing (eg: always using a reverse proxy to reach the app), not doing so would allow anyone to login, even as admin (as they could log in as you).</b></span>
+                                <span>Enable this plugin. <b>Please confirm that you know what you're doing (eg: always using a reverse proxy to reach the app), not doing so would allow anyone to log in as any non-admin user.</b></span>
                             </label>
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
@@ -28,14 +28,13 @@
                         <div class="inputContainer">
                             <input is="emby-input" id="userHeader"  name="httpUserHeader" label="HTTP Header containing user info" autocomplete="off" style="height:auto"/>
                             <div class="fieldDescription">This is the name of the HTTP Header your reverse proxy must provide the username in.<br/>
-                            <b id="current-http-header-pointer">It doesn't appear that the plugin was able to inject the script in "index.html", try to refresh your cache, or follow up <a href="https://github.com/UlysseM/jellyfin-plugin-httpauth">the installation instructions</a></b>
+                            <b id="current-http-header-pointer">It doesn't appear that the plugin was able to inject the script into the web UI. Make sure the "File Transformation" plugin is installed, restart Jellyfin and refresh your cache, or follow up <a href="https://github.com/jtholen001/jellyfin-plugin-httpauth">the installation instructions</a></b>
                             </div>
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
-                            <label class="emby-checkbox-label">
-                                <input id="chkNewUsersAreAdmin" name="chkNewUsersAreAdmin" type="checkbox" is="emby-checkbox" />
-                                <span>If checked, new users will be admin.</span>
-                            </label>
+                            <b>Libraries new users can access</b>
+                            <div class="fieldDescription">Users created by this plugin are never administrators, and are only given access to the libraries checked below (applied once, when the user is first created). If none are checked, new users see no libraries. Existing administrators cannot log in through this plugin.</div>
+                            <div id="httpAuthFolderList"></div>
                         </div>
                         <div>
                             <button is="emby-button" type="submit" class="raised button-submit block emby-button">
@@ -66,8 +65,33 @@
                             }
 
                             document.getElementById('userHeader').value = config.UserHeader;
-                            document.getElementById('chkNewUsersAreAdmin').checked = config.NewUsersAreAdmin;
-                            Dashboard.hideLoadingMsg();
+                            HttpAuthConfigurationPage.loadFolders(config.AllowedFolderIds || []).then(function () {
+                                Dashboard.hideLoadingMsg();
+                            });
+                        });
+                    },
+
+                    loadFolders: function (selectedIds) {
+                        var normalize = function (id) { return String(id).replace(/-/g, '').toLowerCase(); };
+                        var selected = selectedIds.map(normalize);
+                        return ApiClient.getJSON(ApiClient.getUrl('Library/VirtualFolders')).then(function (folders) {
+                            var container = document.getElementById('httpAuthFolderList');
+                            container.innerHTML = '';
+                            folders.forEach(function (folder) {
+                                var label = document.createElement('label');
+                                label.className = 'emby-checkbox-label';
+                                var input = document.createElement('input');
+                                input.type = 'checkbox';
+                                input.className = 'httpAuthFolderCheckbox';
+                                input.setAttribute('is', 'emby-checkbox');
+                                input.dataset.itemId = folder.ItemId;
+                                input.checked = selected.indexOf(normalize(folder.ItemId)) !== -1;
+                                var span = document.createElement('span');
+                                span.textContent = folder.Name;
+                                label.appendChild(input);
+                                label.appendChild(span);
+                                container.appendChild(label);
+                            });
                         });
                     },
 
@@ -82,7 +106,9 @@
                                 document.getElementById('breaker-has-tripped').style = 'display:none';
                             }
                             config.UserHeader = document.getElementById('userHeader').value;
-                            config.NewUsersAreAdmin = document.getElementById('chkNewUsersAreAdmin').checked;
+                            config.AllowedFolderIds = Array.prototype.map.call(
+                                document.querySelectorAll('.httpAuthFolderCheckbox:checked'),
+                                function (box) { return box.dataset.itemId; });
 
                             ApiClient.updatePluginConfiguration(HttpAuthConfigurationPage.pluginUniqueId, config).then(function (result) {
                                 Dashboard.processPluginConfigurationUpdateResult(result);
