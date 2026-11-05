@@ -3,43 +3,90 @@ name: "Publish Plugin"
 on:
   release:
     types:
-      - released
+      - published
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to (re)publish, e.g. v2.1.0"
+        required: true
+        type: string
+
+concurrency:
+  group: publish-plugin
+  cancel-in-progress: false
 
 jobs:
-  build:
-    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/build.yaml@master
-    with:
-      dotnet-version: "9.0.*"
-      dotnet-target: "net9.0"
-  upload:
+  publish:
     runs-on: ubuntu-latest
-    needs:
-      - build
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
-      - name: Download Artifact
-        uses: actions/download-artifact@v7
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: build-artifact
-      - name: Prepare GitHub Release assets
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Read release
+        id: release
         run: |-
-          for file in ./*; do
-            md5sum ${file#./} >> ${file%.*}.md5
-            sha256sum ${file#./} >> ${file%.*}.sha256
+          gh release view "$TAG" --json body,isPrerelease > release.json
+          jq -r '.body // ""' release.json > "$RUNNER_TEMP/changelog.md"
+          echo "prerelease=$(jq -r .isPrerelease release.json)" >> "$GITHUB_OUTPUT"
+          rm release.json
+
+      - name: Stamp version and changelog
+        run: node .github/scripts/release-tools.mjs stamp --tag "$TAG" --changelog "$RUNNER_TEMP/changelog.md"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "9.0.*"
+
+      - name: Build Jellyfin Plugin
+        uses: oddstr13/jellyfin-plugin-repository-manager@9497a0a499416cc572ed2e07a391d9f943a37b4d # v1.1.1
+        id: jprm
+        with:
+          dotnet-target: "net9.0"
+
+      - name: Prepare release assets
+        env:
+          ARTIFACT: ${{ steps.jprm.outputs.artifact }}
+        run: |-
+          mkdir assets
+          cp $ARTIFACT assets/
+          cd assets
+          for file in *.zip; do
+            md5sum "$file" > "${file%.zip}.md5"
+            sha256sum "$file" > "${file%.zip}.sha256"
           done
           ls -l
-      - name: Upload GitHub Release assets
-        uses: shogo82148/actions-upload-release-asset@v1.9.2
-        with:
-          upload_url: ${{ github.event.release.upload_url }}
-          asset_path: ./*
-  generate:
-    runs-on: ubuntu-latest
-    needs:
-      - upload
-    steps:
-      - name: Jellyfin plugin repo
-        uses: Kevinjil/jellyfin-plugin-repo-action@v0.4.3
-        with:
-          githubToken: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
+
+      - name: Update plugin manifest
+        if: steps.release.outputs.prerelease != 'true'
+        run: |-
+          zip=$(ls assets/*.zip)
+          unzip -p "$zip" meta.json > meta.json
+
+          # Newest published (non-draft, non-prerelease) release that already carries a manifest.
+          previous=$(gh api "repos/$GH_REPO/releases?per_page=100" --jq '
+            [.[] | select(.draft == false and .prerelease == false and .tag_name != env.TAG)
+                 | select(any(.assets[]; .name == "manifest.json"))][0].tag_name // empty')
+          if [ -n "$previous" ]; then
+            gh release download "$previous" --pattern manifest.json --output existing.json
+          else
+            echo '[]' > existing.json
+          fi
+
+          node .github/scripts/release-tools.mjs manifest \
+            --meta meta.json \
+            --zip "$zip" \
+            --url "https://github.com/$GH_REPO/releases/download/$TAG/$(basename "$zip")" \
+            --existing existing.json \
+            --out assets/manifest.json
+
+      - name: Upload release assets
+        run: gh release upload "$TAG" assets/* --clobber

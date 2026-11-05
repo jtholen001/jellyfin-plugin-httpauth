@@ -1,9 +1,9 @@
 name: "HttpAuth"
-guid: "d4866cb0-11fb-4f38-b1a5-1efbf870a94d"
-version: "1.1.3"
+guid: "971499f0-2bc6-4721-bd21-00f9c18a5b3d"
+version: "2.0.0.0"
 targetAbi: "10.11.10.0"
 framework: "net9.0"
-owner: "UlysseM"
+owner: "jtholen001"
 overview: "Authenticate users using HTTP Headers"
 description: >
   Allows to skip the authentification when a http header is provided. Only use this plugin if you know what you're doing.
