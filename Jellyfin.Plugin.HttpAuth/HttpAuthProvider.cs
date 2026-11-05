@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Linq;
 using System.Threading.Tasks;
 using Jellyfin.Data;
 using Jellyfin.Database.Implementations.Entities;
@@ -68,21 +69,36 @@ namespace Jellyfin.Plugin.HttpAuth
         private async Task<ProviderAuthenticationResult> DoAuthentification(string actualUsername)
         {
             var userManager = _applicationHost.Resolve<IUserManager>();
-            // Create a user if it doesn't exist.
-            if (userManager.GetUserByName(actualUsername) == null)
+            var existingUser = userManager.GetUserByName(actualUsername);
+            if (existingUser == null)
             {
                 _logger.LogInformation("Creating user {ActualUsername} as it doesn't exist.", actualUsername);
                 User user = await userManager.CreateUserAsync(actualUsername).ConfigureAwait(false);
-                user.SetPermission(PermissionKind.IsAdministrator, Config.NewUsersAreAdmin);
-                user.SetPermission(PermissionKind.EnableAllFolders, true);
+                user.SetPermission(PermissionKind.IsAdministrator, false);
+                user.SetPermission(PermissionKind.EnableAllFolders, false);
+                user.SetPreference(PreferenceKind.EnabledFolders, GetAllowedFolderIds());
                 user.AuthenticationProviderId = GetType().FullName;
                 await userManager.UpdateUserAsync(user).ConfigureAwait(false);
+            }
+            else if (existingUser.HasPermission(PermissionKind.IsAdministrator))
+            {
+                // Never let a header log someone in as an administrator.
+                _logger.LogWarning("Refusing header login for existing user {ActualUsername}: administrators cannot use header authentication.", actualUsername);
+                throw new AuthenticationException("Administrator accounts cannot be used with header authentication.");
             }
             // Then, do the auth
             return new ProviderAuthenticationResult
             {
                 Username = actualUsername
             };
+        }
+
+        private static Guid[] GetAllowedFolderIds()
+        {
+            return (Config.AllowedFolderIds ?? Array.Empty<string>())
+                .Select(id => Guid.TryParse(id, out var guid) ? guid : Guid.Empty)
+                .Where(guid => guid != Guid.Empty)
+                .ToArray();
         }
 
         public Task ChangePassword(User user, string newPassword)

@@ -4,42 +4,34 @@
 
 This plugins allows users to skip the login page (and not set password in jellyfin), provided your app is configured to use a reverse proxy that provides a username through an HTTP header.
 
-**Warning: If you allow connections to your jellyfin without a reverse proxy, or if your reverse proxy doesn't override that header, this plugin is NOT for you, as it would allow anyone to log in as any other user, admin included.**
+**Warning: If you allow connections to your jellyfin without a reverse proxy, or if your reverse proxy doesn't override that header, this plugin is NOT for you, as it would allow anyone to log in as any non-admin user.**
+
+This is a fork of [UlysseM/jellyfin-plugin-httpauth](https://github.com/UlysseM/jellyfin-plugin-httpauth) (GPL v2). Differences from upstream:
+
+- Users created by the plugin are **never administrators**, and header login is refused for existing administrators.
+- New users only get access to the libraries you select in the plugin configuration page.
+- The login script is injected through the [File Transformation](https://github.com/IAmParadox27/jellyfin-plugin-file-transformation) plugin instead of editing `index.html` on disk, so no Docker `chmod` workaround is needed.
 
 ## Installation
 
 1. Modify your reverse proxy to provide a username through some HTTP Header of your choice (eg: `X-Forwarded-User`).
 
-2. (Optional) If you're using docker, and you want to skip the login screen, you will need to allow the app to modify your index.html at startup. This can be done by adding the following `post_start` in your docker compose file.
-```
-services:
-  jellyfin:
-    # ... other config
-    # the next 4 lines needs to be added to your config.
-    post_start:
-      - command: chmod -c 666 /jellyfin/jellyfin-web/index.html
-        user: root
-        privileged: true
-    volumes:
-      # ... other config
-```
+2. Install the **File Transformation** plugin (add `https://www.iamparadox.dev/jellyfin/plugins/manifest.json` as a plugin repository and install it from the catalog). It is required: without it, the auto-login script is not injected. If you used the upstream plugin before, you can restore the original `index.html` (or simply let Jellyfin update).
 
-> Note: The path `/jellyfin/jellyfin-web/index.html` is the path for the official docker image `/jellyfin/jellyfin`. This path may differ based on your image. You can find the path by running a command similar to this `docker exec -it jellyfin find / | grep /index.html` (adjust your container name as needed).
+3. Add the following repository to your jellyfin repositories: `https://raw.githubusercontent.com/jtholen001/jellyfin-plugin-httpauth/gh-pages/repository.json`, install the plugin from the catalog.
 
-3. Add the following repository to your jellyfin repositories: `https://raw.githubusercontent.com/UlysseM/jellyfin-plugin-httpauth/gh-pages/repository.json`, install the plugin from the catalog.
-
-4. After restarting jellyfin, head to the configuration page for the plugin, and check the box to enable the plugin. You may also decide whether you want non-existing users to be created as admin or not, and which HTTP Header you want the app to use (default being `X-Forwarded-User`). While you're on that configuration page, pay attention to the "safety breaker" description. Having the safety-breaker on will turn the plugin off if the server ever receives a connection without authentification headers.
+4. After restarting jellyfin, head to the configuration page for the plugin, and check the box to enable the plugin. Select the libraries new users should be able to access (if you select none, new users see nothing), and choose which HTTP Header you want the app to use (default being `X-Forwarded-User`). While you're on that configuration page, pay attention to the "safety breaker" description. Having the safety-breaker on will turn the plugin off if the server ever receives a connection without authentification headers.
 
 5. You & all your users may need to refresh your cache (Ctrl + Shift + R) to have the updated index that injects the auto-login feature.
 
-6. (Optional) In your "branding", you can mention something like "If you see this page, try Ctrl + Shift + R to login", or you can tell them to manually log in as user: "HttpHeader", password: *whatever they want to fill*. This will work as a backup in case the index.html didn't get modify.
+6. (Optional) In your "branding", you can mention something like "If you see this page, try Ctrl + Shift + R to login", or you can tell them to manually log in as user: "HttpAuth", password: *whatever they want to fill*. This will work as a backup in case the script didn't get injected.
 
 7. That's it! If you log out of your account, and gets redirected to the home page, you should be logged back in almost instantly.
 
 ## How this plugin works
 
-- Whenever a manual login attempt is made with the user `HttpAuth`, regardless of the password, an IAuthenticationProvider implementation will log the user as whatever the http header `X-Forwarded-User` (configurable) is set to.  If that user doesn't exist, it will be automatically created (with or without admin permission depending on the configuration).
-- The html file will be modified when the plugin starts, to inject a javacsript file.
+- Whenever a manual login attempt is made with the user `HttpAuth`, regardless of the password, an IAuthenticationProvider implementation will log the user as whatever the http header `X-Forwarded-User` (configurable) is set to.  If that user doesn't exist, it will be automatically created as a non-admin user with access to the configured libraries only. Existing administrators are refused.
+- When the server starts, the plugin registers a transformation with the File Transformation plugin, which adds a script tag to the served `index.html`. Nothing is written to disk.
 - That javacript file will be served by the plugin itself does few things. On startup, it checks whether the plugin is active and if the http header is provided (by making an API call). If everything looks, it will auto-fill the login path with the right user `HttpAuth`, some random password, before logging in.
 - The HTTP endpoint used to return the name of the header is intended to be call each time the page loads, and if it sees that no HTTP header are set, it will "trip a breaker", disabling the plugin. This is a safety feature, so that in case of misconfiguration, login through this endpoint are automatically disabled. This "safety breaker" can also be turned off in the configuration.
 
