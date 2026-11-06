@@ -18,7 +18,9 @@ This is a fork of [UlysseM/jellyfin-plugin-httpauth](https://github.com/UlysseM/
 
 2. Install the **File Transformation** plugin (add `https://www.iamparadox.dev/jellyfin/plugins/manifest.json` as a plugin repository and install it from the catalog). It is required: without it, the auto-login script is not injected. If you used the upstream plugin before, you can restore the original `index.html` (or simply let Jellyfin update).
 
-3. Add the following repository to your jellyfin repositories: `https://raw.githubusercontent.com/jtholen001/jellyfin-plugin-httpauth/gh-pages/repository.json`, install the plugin from the catalog.
+3. Add the following repository to your jellyfin repositories: `https://github.com/jtholen001/jellyfin-plugin-httpauth/releases/latest/download/manifest.json`, install the plugin from the catalog.
+
+   > Note: this fork has its own plugin identity, so it installs alongside (and does not update) the upstream plugin. Uninstall the upstream plugin first to avoid two login providers.
 
 4. After restarting jellyfin, head to the configuration page for the plugin, and check the box to enable the plugin. Select the libraries new users should be able to access (if you select none, new users see nothing), and choose which HTTP Header you want the app to use (default being `X-Forwarded-User`). While you're on that configuration page, pay attention to the "safety breaker" description. Having the safety-breaker on will turn the plugin off if the server ever receives a connection without authentification headers.
 
